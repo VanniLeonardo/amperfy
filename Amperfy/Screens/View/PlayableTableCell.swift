@@ -475,7 +475,14 @@ class PlayableTableCell: BasicTableCell {
       animateActivation()
       hideSearchBarKeyboardInRootView()
       Haptics.success.vibrate(isHapticsEnabled: appDelegate.storage.settings.user.isHapticsEnabled)
-      appDelegate.player.play(context: context)
+      if appDelegate.storage.settings.user.isSoftQueueEnabled, playable.isSong {
+        // Soft Queue: the tapped song first, the rest of the list shuffled behind it
+        var shuffledContext = context
+        shuffledContext.isKeepIndexDuringShuffle = true
+        appDelegate.player.playShuffled(context: shuffledContext)
+      } else {
+        appDelegate.player.play(context: context)
+      }
     }
   }
 

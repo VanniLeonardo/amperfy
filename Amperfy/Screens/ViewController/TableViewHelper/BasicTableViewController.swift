@@ -370,11 +370,14 @@ class BasicTableViewController: KeyCommandTableViewController {
                 .filterCached(dependigOn: self.appDelegate.storage.settings.user.isOfflineMode)
             )
         case .appendContextQueue:
-          self.appDelegate.player
-            .appendContextQueue(
-              playables: actionContext.playables
-                .filterCached(dependigOn: self.appDelegate.storage.settings.user.isOfflineMode)
-            )
+          let playables = actionContext.playables
+            .filterCached(dependigOn: self.appDelegate.storage.settings.user.isOfflineMode)
+          // Soft Queue: appended songs play before the rest of the context queue
+          if self.appDelegate.storage.settings.user.isSoftQueueEnabled {
+            self.appDelegate.player.appendUserQueue(playables: playables)
+          } else {
+            self.appDelegate.player.appendContextQueue(playables: playables)
+          }
         case .download:
           if let account = actionContext.containable.account {
             self.appDelegate.getMeta(account.info).playableDownloadManager

@@ -122,6 +122,13 @@ struct PlayerSettingsView: View {
           footer: "When the queue ends, automatically continue playback using Instant Mix to find similar songs."
         )
 
+        SettingsSection(
+          content: {
+            SettingsCheckBoxRow(title: "Soft Queue", isOn: $settings.isSoftQueueEnabled)
+          },
+          footer: "Tapping a song plays it and shuffles the rest of its list behind it. Songs appended to the queue play before that shuffled rest."
+        )
+
         // Streaming Format Settings
         SettingsSection(
           content: {

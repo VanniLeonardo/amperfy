@@ -210,6 +210,11 @@ class SettingsHostVC: UIViewController {
       self.appDelegate.storage.settings.user.isAutoplayEnabled = newValue
     }))
 
+    settings.isSoftQueueEnabled = appDelegate.storage.settings.user.isSoftQueueEnabled
+    changesAgent.append(settings.$isSoftQueueEnabled.sink(receiveValue: { newValue in
+      self.appDelegate.storage.settings.user.isSoftQueueEnabled = newValue
+    }))
+
     settings.swipeActionSettings = appDelegate.storage.settings.user.swipeActionSettings
 
     settings.isReplayGainEnabled = appDelegate.storage.settings.user.isReplayGainEnabled

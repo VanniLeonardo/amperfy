@@ -184,6 +184,12 @@ public struct UserSettings: Sendable, Codable {
     set { _isAutoplayEnabled = newValue }
   }
 
+  private var _isSoftQueueEnabled: Bool = false
+  public var isSoftQueueEnabled: Bool {
+    get { _isSoftQueueEnabled }
+    set { _isSoftQueueEnabled = newValue }
+  }
+
   private var _isHapticsEnabled: Bool = true
   public var isHapticsEnabled: Bool {
     get { _isHapticsEnabled }

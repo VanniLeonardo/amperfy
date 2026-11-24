@@ -484,7 +484,12 @@ class EntityPreviewActionBuilder {
       },
       UIAction(title: "Append Context Queue", image: .contextQueueAppend) { action in
         guard !self.entityPlayables.isEmpty else { return }
-        self.appDelegate.player.appendContextQueue(playables: self.entityPlayables)
+        // Soft Queue: appended songs play before the rest of the context queue
+        if self.appDelegate.storage.settings.user.isSoftQueueEnabled {
+          self.appDelegate.player.appendUserQueue(playables: self.entityPlayables)
+        } else {
+          self.appDelegate.player.appendContextQueue(playables: self.entityPlayables)
+        }
       },
       UIAction(title: "Insert User Queue", image: .userQueueInsert) { action in
         guard !self.entityPlayables.isEmpty else { return }

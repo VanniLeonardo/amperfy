@@ -99,4 +99,7 @@ final class Settings: ObservableObject {
 
   @Published
   var isAutoplayEnabled = false
+
+  @Published
+  var isSoftQueueEnabled = false
 }
