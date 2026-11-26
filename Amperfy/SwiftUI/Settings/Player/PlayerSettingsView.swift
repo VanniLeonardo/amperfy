@@ -137,6 +137,13 @@ struct PlayerSettingsView: View {
 
         SettingsSection(
           content: {
+            SettingsCheckBoxRow(title: "Smart Shuffle", isOn: $settings.isSmartShuffleEnabled)
+          },
+          footer: "Shuffle moves songs played in the last two days, and songs you keep skipping, towards the back."
+        )
+
+        SettingsSection(
+          content: {
             SettingsRow(title: "Quick Add Playlist") {
               Menu(settings.quickAddPlaylistName.isEmpty ? "Off" : settings.quickAddPlaylistName) {
                 Button("Off") { settings.quickAddPlaylistName = "" }
@@ -153,7 +160,7 @@ struct PlayerSettingsView: View {
           content: {
             SettingsCheckBoxRow(title: "Listening Reports", isOn: $settings.isListenReportEnabled)
           },
-          footer: "Reports how long each song was really played to a receiver at <server url>/add/listens. Leave off unless your server has one."
+          footer: "Reports how long each song was really played to a receiver at <server url>/add/listens, and shows a Not for Me button in the player. Leave off unless your server has that receiver."
         )
 
         // Streaming Format Settings

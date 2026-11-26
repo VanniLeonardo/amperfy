@@ -481,8 +481,16 @@ public class Playlist: Identifyable {
     library.saveContext()
   }
 
-  public func shuffle() {
-    let shuffledItems = managedObject.items.shuffled()
+  /// weight: how likely a song is to come early (see SmartShuffle); nil shuffles evenly
+  public func shuffle(weight: ((AbstractPlayable) -> Double)? = nil) {
+    let shuffledItems: [PlaylistItemMO]
+    if let weight {
+      shuffledItems = SmartShuffle.order(managedObject.items) {
+        weight(AbstractPlayable(managedObject: $0.playable))
+      }
+    } else {
+      shuffledItems = managedObject.items.shuffled()
+    }
     guard !shuffledItems.isEmpty else { return }
 
     // Reuse entries to preserve duplicate occurrences and avoid orphaned metadata.

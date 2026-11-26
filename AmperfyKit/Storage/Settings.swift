@@ -196,6 +196,12 @@ public struct UserSettings: Sendable, Codable {
     set { _isListenReportEnabled = newValue }
   }
 
+  private var _isSmartShuffleEnabled: Bool = false
+  public var isSmartShuffleEnabled: Bool {
+    get { _isSmartShuffleEnabled }
+    set { _isSmartShuffleEnabled = newValue }
+  }
+
   private var _quickAddPlaylistName: String = ""
   public var quickAddPlaylistName: String {
     get { _quickAddPlaylistName }

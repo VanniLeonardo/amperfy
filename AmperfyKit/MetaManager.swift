@@ -118,10 +118,20 @@ public class MetaManager {
   private var listenReporter: ListenReporter?
   private func addListenReporter(player: PlayerFacade) {
     guard listenReporter == nil else { return }
-    let reporter = ListenReporter(player: player, account: account, storage: storage)
+    let reporter = ListenReporter(
+      currentSong: { player.currentlyPlaying?.asSong },
+      account: account,
+      storage: storage
+    )
     listenReporter = reporter
     player.addNotifier(notifier: reporter)
     reporter.upload() // listens queued while the receiver was unreachable
+  }
+
+  /// "Not for me": returns whether the server deleted the song (a Discover pick), nil if the
+  /// receiver could not be reached
+  public func reject(song: Song) async -> Bool? {
+    await listenReporter?.reject(song: song)
   }
 
   private var scrobbleSyncer: ScrobbleSyncer?

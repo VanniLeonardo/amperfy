@@ -107,4 +107,6 @@ final class Settings: ObservableObject {
   var isListenReportEnabled = false
   @Published
   var quickAddPlaylistName = ""
+  @Published
+  var isSmartShuffleEnabled = false
 }

@@ -219,6 +219,10 @@ class SettingsHostVC: UIViewController {
     changesAgent.append(settings.$isListenReportEnabled.sink(receiveValue: { newValue in
       self.appDelegate.storage.settings.user.isListenReportEnabled = newValue
     }))
+    settings.isSmartShuffleEnabled = appDelegate.storage.settings.user.isSmartShuffleEnabled
+    changesAgent.append(settings.$isSmartShuffleEnabled.sink(receiveValue: { newValue in
+      self.appDelegate.storage.settings.user.isSmartShuffleEnabled = newValue
+    }))
     settings.quickAddPlaylistName = appDelegate.storage.settings.user.quickAddPlaylistName
     changesAgent.append(settings.$quickAddPlaylistName.sink(receiveValue: { newValue in
       self.appDelegate.storage.settings.user.quickAddPlaylistName = newValue

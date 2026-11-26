@@ -76,15 +76,45 @@ class PlayerControlView: UIView {
   @IBOutlet
   weak var optionsButton: UIButton!
 
-  private lazy var quickAddButton: UIButton = {
+  private func createOptionsRowButton(image: UIImage?, action: Selector) -> UIButton {
     let button = UIButton(type: .system)
-    button.setImage(UIImage.playlistPlus, for: .normal)
+    button.setImage(image, for: .normal)
     button.tintColor = .label
     button.widthAnchor.constraint(equalToConstant: 28).isActive = true
     button.heightAnchor.constraint(equalToConstant: 28).isActive = true
-    button.addTarget(self, action: #selector(quickAddPressed), for: .touchUpInside)
+    button.addTarget(self, action: action, for: .touchUpInside)
     return button
-  }()
+  }
+
+  private lazy var quickAddButton = createOptionsRowButton(
+    image: UIImage.playlistPlus,
+    action: #selector(quickAddPressed)
+  )
+  private lazy var notForMeButton = createOptionsRowButton(
+    image: UIImage(systemName: "hand.thumbsdown"),
+    action: #selector(notForMePressed)
+  )
+
+  /// Tells the server the current song is unwanted (it deletes a Discover pick) and skips it
+  @objc
+  private func notForMePressed() {
+    guard let song = player.currentlyPlaying?.asSong, let account = song.account else { return }
+    Haptics.success.vibrate(isHapticsEnabled: appDelegate.storage.settings.user.isHapticsEnabled)
+    Task { @MainActor in
+      guard let removed = await self.appDelegate.getMeta(account.info).reject(song: song) else {
+        self.appDelegate.eventLogger
+          .info(topic: "Not for Me", message: "The server could not be reached")
+        return
+      }
+      self.appDelegate.eventLogger.info(
+        topic: "Not for Me",
+        message: removed ? "Removed from Discover" : "Noted"
+      )
+      if self.player.currentlyPlaying?.asSong == song {
+        self.player.playNext()
+      }
+    }
+  }
 
   @objc
   private func quickAddPressed() {
@@ -137,6 +167,7 @@ class PlayerControlView: UIView {
     volumeButton.accessibilityLabel = "Volume"
     optionsButton.accessibilityLabel = "Player Options"
     optionsStackView.insertArrangedSubview(quickAddButton, at: 0)
+    optionsStackView.insertArrangedSubview(notForMeButton, at: 1)
     refreshPlayer()
     playerHandler?.refreshPlayerOptions(
       optionsButton: optionsButton,
@@ -468,6 +499,9 @@ class PlayerControlView: UIView {
     let quickAddName = appDelegate.storage.settings.user.quickAddPlaylistName
     quickAddButton.isHidden = quickAddName.isEmpty || player.playerMode != .music
     quickAddButton.accessibilityLabel = "Add to \(quickAddName)"
+    notForMeButton.isHidden = !appDelegate.storage.settings.user.isListenReportEnabled
+      || player.playerMode != .music
+    notForMeButton.accessibilityLabel = "Not for Me"
     optionsStackView.layoutIfNeeded()
   }
 }

@@ -149,6 +149,10 @@ public class AmperKit {
     ))
 
     let playerData = storage.main.library.getPlayerData()
+    let shuffleSettings = storage.settings
+    playerData.shuffleWeightProvider = {
+      shuffleSettings.user.isSmartShuffleEnabled ? SmartShuffle.weights() : nil
+    }
     let queueHandler = PlayQueueHandler(playerData: playerData)
     let curPlayer = AudioPlayer(
       coreData: playerData,

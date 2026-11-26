@@ -118,6 +118,9 @@ public class PlayerData: NSObject {
 
   static let entityName: String = { "Player" }()
 
+  /// Smart Shuffle: asked at every shuffle; nil shuffles evenly
+  var shuffleWeightProvider: (() -> ((AbstractPlayable) -> Double)?)?
+
   init(
     library: LibraryStorage,
     managedObject: PlayerMO,
@@ -193,7 +196,7 @@ extension PlayerData: PlayerStatusPersistent {
 
   func setShuffle(_ newValue: Bool) {
     if newValue {
-      shuffledContextPlaylist.shuffle()
+      shuffledContextPlaylist.shuffle(weight: shuffleWeightProvider?())
       if let curPlayable = currentItem,
          let indexOfCurrentItemInShuffledPlaylist = shuffledContextPlaylist
          .getFirstIndex(playable: curPlayable) {
