@@ -137,6 +137,13 @@ struct PlayerSettingsView: View {
 
         SettingsSection(
           content: {
+            SettingsCheckBoxRow(title: "Crossfade", isOn: $settings.isCrossfadeEnabled)
+          },
+          footer: "The last 6 seconds of a song fade out while the next song fades in. Pausing, seeking or skipping cuts the overlap."
+        )
+
+        SettingsSection(
+          content: {
             SettingsCheckBoxRow(title: "Smart Shuffle", isOn: $settings.isSmartShuffleEnabled)
           },
           footer: "Shuffle moves songs played in the last two days, and songs you keep skipping, towards the back."

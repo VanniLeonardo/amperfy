@@ -109,4 +109,6 @@ final class Settings: ObservableObject {
   var quickAddPlaylistName = ""
   @Published
   var isSmartShuffleEnabled = false
+  @Published
+  var isCrossfadeEnabled = false
 }

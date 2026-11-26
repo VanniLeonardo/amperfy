@@ -177,6 +177,7 @@ public class AmperKit {
       .updateEqualizerSetting(eqSetting: storage.settings.user.activeEqualizerSetting)
     backendAudioPlayer.updateReplayGainEnabled(isEnabled: storage.settings.user.isReplayGainEnabled)
     backendAudioPlayer.volume = storage.settings.user.playerVolume
+    backendAudioPlayer.isCrossfadeEnabledCB = { shuffleSettings.user.isCrossfadeEnabled }
 
     playerDownloadPreparationHandler = PlayerDownloadPreparationHandler(
       playerStatus: playerData,

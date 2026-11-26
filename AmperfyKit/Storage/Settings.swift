@@ -196,6 +196,12 @@ public struct UserSettings: Sendable, Codable {
     set { _isListenReportEnabled = newValue }
   }
 
+  private var _isCrossfadeEnabled: Bool = false
+  public var isCrossfadeEnabled: Bool {
+    get { _isCrossfadeEnabled }
+    set { _isCrossfadeEnabled = newValue }
+  }
+
   private var _isSmartShuffleEnabled: Bool = false
   public var isSmartShuffleEnabled: Bool {
     get { _isSmartShuffleEnabled }

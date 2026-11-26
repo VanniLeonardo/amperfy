@@ -167,3 +167,83 @@ class ListenReporterTest: XCTestCase {
     XCTAssertEqual(playlist.playables.first?.id, last.id)
   }
 }
+
+// MARK: - Crossfade
+
+extension MusicPlayerTest {
+  private func waitSeconds(_ seconds: TimeInterval) {
+    let nothing = expectation(description: "only waits")
+    nothing.isInverted = true
+    wait(for: [nothing], timeout: seconds)
+  }
+
+  func testCrossfadeVolumes() {
+    let begin = BackendAudioPlayer.crossfadeVolumes(progress: 0)
+    XCTAssertEqual(begin.fadeOut, 1, accuracy: 0.001)
+    XCTAssertEqual(begin.fadeIn, 0, accuracy: 0.001)
+    let middle = BackendAudioPlayer.crossfadeVolumes(progress: 0.5)
+    XCTAssertEqual(middle.fadeOut, middle.fadeIn, accuracy: 0.001)
+    // equal power: the summed energy stays constant
+    XCTAssertEqual(middle.fadeOut * middle.fadeOut + middle.fadeIn * middle.fadeIn, 1, accuracy: 0.001)
+    let end = BackendAudioPlayer.crossfadeVolumes(progress: 7)
+    XCTAssertEqual(end.fadeOut, 0, accuracy: 0.001)
+    XCTAssertEqual(end.fadeIn, 1, accuracy: 0.001)
+  }
+
+  /// In the last seconds the next song starts on a second player while the first one fades out
+  func testCrossfade_NextSongStartsOnSecondPlayer_FirstOneIsStoppedAfterwards() {
+    backendPlayer.isCrossfadeEnabledCB = { true }
+    let first = mockAudioStreamingPlayer!
+    songCached.remoteDuration = 60
+    testPlayer.appendContextQueue(playables: [songCached, songToDownload])
+    testPlayer.play()
+    first.mockElapsedTime = 58.5 // 1.5 s left
+    let second = MOCK_AudioStreamingPlayer()
+    mockAudioStreamingPlayer = second // what the backend gets when it asks for a new player
+
+    waitSeconds(1.6) // the check runs once per second
+    XCTAssertEqual(testPlayer.currentlyPlaying, songToDownload)
+    XCTAssertTrue(first.queuedUrls.isEmpty) // not queued behind the first song
+    XCTAssertFalse(first.isStopped) // still fading out
+    XCTAssertTrue(second.isPlaying)
+
+    waitSeconds(2.0) // the fade lasts as long as the first song had left
+    XCTAssertTrue(first.isStopped)
+    XCTAssertTrue(second.isPlaying)
+    XCTAssertEqual(second.volume, 1, accuracy: 0.01)
+    XCTAssertTrue(testPlayer.isPlaying)
+  }
+
+  /// Pausing during the overlap ends it: only the new song is left, paused
+  func testCrossfade_PauseCutsTheOverlap() {
+    backendPlayer.isCrossfadeEnabledCB = { true }
+    let first = mockAudioStreamingPlayer!
+    songCached.remoteDuration = 60
+    testPlayer.appendContextQueue(playables: [songCached, songToDownload])
+    testPlayer.play()
+    first.mockElapsedTime = 55 // 5 s left
+    let second = MOCK_AudioStreamingPlayer()
+    mockAudioStreamingPlayer = second
+
+    waitSeconds(1.6)
+    XCTAssertFalse(first.isStopped)
+    testPlayer.pause()
+    XCTAssertTrue(first.isStopped)
+    XCTAssertFalse(second.isPlaying)
+    XCTAssertEqual(testPlayer.currentlyPlaying, songToDownload)
+  }
+
+  /// Switched off, the next song is queued behind the current one on the same player
+  func testCrossfadeOff_NextSongIsQueuedGapless() {
+    backendPlayer.isCrossfadeEnabledCB = { false }
+    let first = mockAudioStreamingPlayer!
+    songCached.remoteDuration = 60
+    testPlayer.appendContextQueue(playables: [songCached, songToDownload])
+    testPlayer.play()
+    first.mockElapsedTime = 58.5
+
+    waitSeconds(2.0)
+    XCTAssertEqual(first.queuedUrls.count, 1)
+    XCTAssertEqual(testPlayer.currentlyPlaying, songCached)
+  }
+}

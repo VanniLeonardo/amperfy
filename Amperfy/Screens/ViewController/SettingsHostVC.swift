@@ -219,6 +219,10 @@ class SettingsHostVC: UIViewController {
     changesAgent.append(settings.$isListenReportEnabled.sink(receiveValue: { newValue in
       self.appDelegate.storage.settings.user.isListenReportEnabled = newValue
     }))
+    settings.isCrossfadeEnabled = appDelegate.storage.settings.user.isCrossfadeEnabled
+    changesAgent.append(settings.$isCrossfadeEnabled.sink(receiveValue: { newValue in
+      self.appDelegate.storage.settings.user.isCrossfadeEnabled = newValue
+    }))
     settings.isSmartShuffleEnabled = appDelegate.storage.settings.user.isSmartShuffleEnabled
     changesAgent.append(settings.$isSmartShuffleEnabled.sink(receiveValue: { newValue in
       self.appDelegate.storage.settings.user.isSmartShuffleEnabled = newValue

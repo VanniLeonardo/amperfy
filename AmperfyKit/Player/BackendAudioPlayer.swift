@@ -116,6 +116,13 @@ class BackendAudioPlayer: NSObject {
   private var volumePlayer: Float = 1.0
 
   private var player: AudioStreamingPlayer?
+  /// Crossfade: the previous song's player while it fades out under the next song
+  private var fadingPlayer: AudioStreamingPlayer?
+  private var crossfadeTimer: Timer?
+  private var isStartingCrossfade = false
+  static let crossfadeDuration: Double = 6.0
+  /// Crossfade (Settings > Player): asked in the last seconds of every song
+  var isCrossfadeEnabledCB: (() -> Bool)?
   private var equalizer: AVAudioUnitEQ?
   private var replayGainNode: AVAudioMixerNode?
   public private(set) var audioAnalyzer: AudioAnalyzer
@@ -286,6 +293,13 @@ class BackendAudioPlayer: NSObject {
         guard let nextPreloadedPlayable = nextPlayablePreloadCB?(),
               nextPreloadedPlayable.isCached || !isOfflineMode
         else { return }
+        if canCrossfade(to: nextPreloadedPlayable) {
+          // not queued behind this song: it starts on a player of its own
+          if remainingTime <= Self.crossfadeDuration {
+            startCrossfade(remainingTime: remainingTime)
+          }
+          return
+        }
         self.nextPreloadedPlayable = nextPreloadedPlayable
         os_log(.default, "Preloading: %s", nextPreloadedPlayable.displayString)
         if nextPreloadedPlayable.isCached {
@@ -306,6 +320,57 @@ class BackendAudioPlayer: NSObject {
         }
       }
     }
+  }
+
+  private func canCrossfade(to next: AbstractPlayable) -> Bool {
+    guard fadingPlayer == nil, streamTimeOffset == 0, let currentPlayable,
+          currentPlayable.isSong, next.isSong, next != currentPlayable,
+          duration > 3 * Self.crossfadeDuration
+    else { return false }
+    return isCrossfadeEnabledCB?() ?? false
+  }
+
+  /// Volumes of the outgoing and the incoming song at a point of the crossfade (equal power)
+  static func crossfadeVolumes(progress: Double) -> (fadeOut: Float, fadeIn: Float) {
+    let angle = min(max(progress, 0), 1) * Double.pi / 2
+    return (Float(cos(angle)), Float(sin(angle)))
+  }
+
+  /// The current song keeps playing on its player and fades out, the next one starts on a
+  /// new player and fades in. For everything above this class the current song ends here.
+  private func startCrossfade(remainingTime: Double) {
+    guard let outgoing = player else { return }
+    os_log(.default, "Crossfade over %.1f s", remainingTime)
+    outgoing.delegate = nil // its end is not the end of the current song anymore
+    fadingPlayer = outgoing
+    player = nil
+    initAudioStreamingPlayerAndNodes()
+    player?.volume = 0
+    let start = Date()
+    crossfadeTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+      Task { @MainActor in
+        guard let self, self.fadingPlayer != nil else { return }
+        let progress = Date().timeIntervalSince(start) / remainingTime
+        guard progress < 1 else { return self.endCrossfade() }
+        let volumes = Self.crossfadeVolumes(progress: progress)
+        self.fadingPlayer?.volume = self.volumePlayer * volumes.fadeOut
+        self.player?.volume = self.volumePlayer * volumes.fadeIn
+      }
+    }
+    currentPlayUrl = ""
+    isStartingCrossfade = true
+    itemFinishedPlaying() // the layers above request the next song, see handleRequest
+    isStartingCrossfade = false
+  }
+
+  /// Also cuts a crossfade short: pausing, seeking, stopping or another song ends the overlap
+  private func endCrossfade() {
+    crossfadeTimer?.invalidate()
+    crossfadeTimer = nil
+    guard let fadingPlayer else { return }
+    self.fadingPlayer = nil
+    fadingPlayer.stop()
+    player?.volume = volumePlayer
   }
 
   @MainActor
@@ -329,6 +394,7 @@ class BackendAudioPlayer: NSObject {
     }
     isErrorOccurred = true
     elapsedTimeBeforeErrorOccurred = elapsedTime
+    endCrossfade()
     pause()
     nextPreloadedPlayable = nil
     nextPreloadedUrl = ""
@@ -365,6 +431,7 @@ class BackendAudioPlayer: NSObject {
       shouldPlayAfterStreamRestart = false
     }
     isPlaying = false
+    endCrossfade()
     player?.pause()
     stopTimers()
     audioAnalyzer.stop()
@@ -382,6 +449,7 @@ class BackendAudioPlayer: NSObject {
   }
 
   func seek(toSecond: Double) {
+    endCrossfade()
     // before the stream has started, the seek is applied in didStartPlaying
     if isSeekByStreamRestartNeeded, currentPlayUrl != "" || shouldPlayAfterStreamRestart != nil {
       restartStream(atSecond: toSecond)
@@ -522,6 +590,9 @@ class BackendAudioPlayer: NSObject {
   }
 
   private func handleRequest(playable: AbstractPlayable) {
+    if !isStartingCrossfade {
+      endCrossfade()
+    }
     currentMetadataDuration = Double(playable.duration)
     currentPlayable = playable
     streamTimeOffset = 0.0
@@ -664,6 +735,7 @@ class BackendAudioPlayer: NSObject {
 
     stopTimers()
     audioAnalyzer.stop()
+    endCrossfade()
     player?.stop()
   }
 
