@@ -102,4 +102,9 @@ final class Settings: ObservableObject {
 
   @Published
   var isSoftQueueEnabled = false
+
+  @Published
+  var isListenReportEnabled = false
+  @Published
+  var quickAddPlaylistName = ""
 }

@@ -76,6 +76,42 @@ class PlayerControlView: UIView {
   @IBOutlet
   weak var optionsButton: UIButton!
 
+  private lazy var quickAddButton: UIButton = {
+    let button = UIButton(type: .system)
+    button.setImage(UIImage.playlistPlus, for: .normal)
+    button.tintColor = .label
+    button.widthAnchor.constraint(equalToConstant: 28).isActive = true
+    button.heightAnchor.constraint(equalToConstant: 28).isActive = true
+    button.addTarget(self, action: #selector(quickAddPressed), for: .touchUpInside)
+    return button
+  }()
+
+  @objc
+  private func quickAddPressed() {
+    let name = appDelegate.storage.settings.user.quickAddPlaylistName
+    guard let song = player.currentlyPlaying?.asSong, let account = song.account else { return }
+    guard appDelegate.storage.settings.user.isOnlineMode,
+          let playlist = appDelegate.storage.main.library.getPlaylists(for: account)
+          .first(where: { $0.name == name })
+    else {
+      appDelegate.eventLogger.info(topic: "Quick Add", message: "\"\(name)\" is not available")
+      return
+    }
+    guard !playlist.playables.contains(song) else {
+      appDelegate.eventLogger.info(topic: "Quick Add", message: "Already in \"\(name)\"")
+      return
+    }
+    Haptics.success.vibrate(isHapticsEnabled: appDelegate.storage.settings.user.isHapticsEnabled)
+    Task { @MainActor in do {
+      try await self.appDelegate.getMeta(account.info).librarySyncer
+        .syncUpload(playlistToAddSongs: playlist, songs: [song])
+      playlist.append(playables: [song])
+      self.appDelegate.eventLogger.info(topic: "Quick Add", message: "Added to \"\(name)\"")
+    } catch {
+      self.appDelegate.eventLogger.report(topic: "Playlist Add Songs", error: error)
+    }}
+  }
+
   required init?(coder aDecoder: NSCoder) {
     super.init(coder: aDecoder)
     self.layoutMargins = Self.margin
@@ -100,6 +136,7 @@ class PlayerControlView: UIView {
     airplayButton.accessibilityLabel = "AirPlay"
     volumeButton.accessibilityLabel = "Volume"
     optionsButton.accessibilityLabel = "Player Options"
+    optionsStackView.insertArrangedSubview(quickAddButton, at: 0)
     refreshPlayer()
     playerHandler?.refreshPlayerOptions(
       optionsButton: optionsButton,
@@ -428,6 +465,9 @@ class PlayerControlView: UIView {
       playerModeButton.setImage(UIImage.podcast, for: .normal)
       playerModeButton.accessibilityLabel = "Player Mode: Podcast"
     }
+    let quickAddName = appDelegate.storage.settings.user.quickAddPlaylistName
+    quickAddButton.isHidden = quickAddName.isEmpty || player.playerMode != .music
+    quickAddButton.accessibilityLabel = "Add to \(quickAddName)"
     optionsStackView.layoutIfNeeded()
   }
 }

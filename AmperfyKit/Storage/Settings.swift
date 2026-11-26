@@ -190,6 +190,18 @@ public struct UserSettings: Sendable, Codable {
     set { _isSoftQueueEnabled = newValue }
   }
 
+  private var _isListenReportEnabled: Bool = false
+  public var isListenReportEnabled: Bool {
+    get { _isListenReportEnabled }
+    set { _isListenReportEnabled = newValue }
+  }
+
+  private var _quickAddPlaylistName: String = ""
+  public var quickAddPlaylistName: String {
+    get { _quickAddPlaylistName }
+    set { _quickAddPlaylistName = newValue }
+  }
+
   private var _isHapticsEnabled: Bool = true
   public var isHapticsEnabled: Bool {
     get { _isHapticsEnabled }

@@ -115,6 +115,15 @@ public class MetaManager {
     )
   }
 
+  private var listenReporter: ListenReporter?
+  private func addListenReporter(player: PlayerFacade) {
+    guard listenReporter == nil else { return }
+    let reporter = ListenReporter(player: player, account: account, storage: storage)
+    listenReporter = reporter
+    player.addNotifier(notifier: reporter)
+    reporter.upload() // listens queued while the receiver was unreachable
+  }
+
   private var scrobbleSyncer: ScrobbleSyncer?
   internal func createScrobbleSyncer(
     player: PlayerFacade
@@ -304,6 +313,7 @@ public class MetaManager {
     startBackgroundLibrarySyncerIfNoResumePending()
     let scrobbler = createScrobbleSyncer(player: player)
     player.addNotifier(notifier: scrobbler)
+    addListenReporter(player: player)
   }
 
   public func startManagerForNormalOperation(player: PlayerFacade) {
@@ -323,6 +333,7 @@ public class MetaManager {
     startBackgroundLibrarySyncerIfNoResumePending()
     let scrobbler = createScrobbleSyncer(player: player)
     player.addNotifier(notifier: scrobbler)
+    addListenReporter(player: player)
     scrobbler.start()
   }
 

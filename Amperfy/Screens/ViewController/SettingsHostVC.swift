@@ -215,6 +215,15 @@ class SettingsHostVC: UIViewController {
       self.appDelegate.storage.settings.user.isSoftQueueEnabled = newValue
     }))
 
+    settings.isListenReportEnabled = appDelegate.storage.settings.user.isListenReportEnabled
+    changesAgent.append(settings.$isListenReportEnabled.sink(receiveValue: { newValue in
+      self.appDelegate.storage.settings.user.isListenReportEnabled = newValue
+    }))
+    settings.quickAddPlaylistName = appDelegate.storage.settings.user.quickAddPlaylistName
+    changesAgent.append(settings.$quickAddPlaylistName.sink(receiveValue: { newValue in
+      self.appDelegate.storage.settings.user.quickAddPlaylistName = newValue
+    }))
+
     settings.swipeActionSettings = appDelegate.storage.settings.user.swipeActionSettings
 
     settings.isReplayGainEnabled = appDelegate.storage.settings.user.isReplayGainEnabled

@@ -68,6 +68,12 @@ struct PlayerSettingsView: View {
     settings.cacheTranscodingFormatPreference = format
   }
 
+  private var playlistNames: [String] {
+    guard let info = appDelegate.storage.settings.accounts.active else { return [] }
+    let library = appDelegate.storage.main.library
+    return library.getPlaylists(for: library.getAccount(info: info)).map { $0.name }.sorted()
+  }
+
   var body: some View {
     ZStack {
       SettingsList {
@@ -127,6 +133,27 @@ struct PlayerSettingsView: View {
             SettingsCheckBoxRow(title: "Soft Queue", isOn: $settings.isSoftQueueEnabled)
           },
           footer: "Tapping a song plays it and shuffles the rest of its list behind it. Songs appended to the queue play before that shuffled rest."
+        )
+
+        SettingsSection(
+          content: {
+            SettingsRow(title: "Quick Add Playlist") {
+              Menu(settings.quickAddPlaylistName.isEmpty ? "Off" : settings.quickAddPlaylistName) {
+                Button("Off") { settings.quickAddPlaylistName = "" }
+                ForEach(playlistNames, id: \.self) { name in
+                  Button(name) { settings.quickAddPlaylistName = name }
+                }
+              }
+            }
+          },
+          footer: "Shows a button in the player that adds the current song to this playlist with one tap."
+        )
+
+        SettingsSection(
+          content: {
+            SettingsCheckBoxRow(title: "Listening Reports", isOn: $settings.isListenReportEnabled)
+          },
+          footer: "Reports how long each song was really played to a receiver at <server url>/add/listens. Leave off unless your server has one."
         )
 
         // Streaming Format Settings
