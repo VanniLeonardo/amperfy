@@ -7,7 +7,37 @@ on:
       ref:
         description: Branch to build
         default: leomusique
+      tests:
+        description: Test classes of AmperfyKitTests to run (space separated)
+        default: ListenReporterTest PlayQueueHandlerTest MusicPlayerTest
 jobs:
+  test:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Unit tests on an iPhone simulator
+        run: |
+          set -o pipefail
+          udid=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for k in sorted(d, reverse=True) if "iOS" in k for x in d[k] if "iPhone" in x["name"]))')
+          xcrun simctl list devices available | grep "$udid"
+          xcodebuild test -project Amperfy.xcodeproj -scheme Amperfy -destination "id=$udid" \
+            -derivedDataPath build-test -skipPackagePluginValidation -skipMacroValidation CODE_SIGNING_ALLOWED=NO \
+            $(for t in ${{ inputs.tests }}; do printf -- '-only-testing:AmperfyKitTests/%s ' "$t"; done) \
+            2>&1 | tee test.log | grep -E "error:|Test Case .* (passed|failed)|Executed|TEST (SUCCEEDED|FAILED)|\*\* " || true
+          grep -q "TEST SUCCEEDED" test.log
+      - name: What the project's formatter changed
+        if: always()
+        run: git diff > format.patch; git diff --stat | tail -5
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-log
+          path: |
+            test.log
+            format.patch
   build:
     runs-on: macos-26
     timeout-minutes: 60
