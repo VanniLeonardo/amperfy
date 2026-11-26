@@ -18,6 +18,7 @@
 //
 
 @testable import AmperfyKit
+import AVFoundation
 import CoreData
 import XCTest
 
@@ -168,6 +169,38 @@ class ListenReporterTest: XCTestCase {
   }
 }
 
+// MARK: - LevelMeter
+
+/// Measures what a player really puts out: the RMS level of its mixer's output
+final class LevelMeter: @unchecked Sendable {
+  private let lock = NSLock()
+  private var level: Float = 0
+  private var updated = Date.distantPast
+
+  /// 0 once the player has stopped delivering audio
+  var rms: Float {
+    lock.withLock { Date().timeIntervalSince(updated) < 0.3 ? level : 0 }
+  }
+
+  // nonisolated: the tap block runs on an audio thread
+  nonisolated static func install(on node: AVAudioMixerNode) -> LevelMeter {
+    let meter = LevelMeter()
+    node.installTap(onBus: 0, bufferSize: 1024, format: nil) { buffer, _ in
+      guard let samples = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return }
+      var sum: Float = 0
+      for index in 0 ..< Int(buffer.frameLength) {
+        sum += samples[index] * samples[index]
+      }
+      let level = (sum / Float(buffer.frameLength)).squareRoot()
+      meter.lock.withLock {
+        meter.level = level
+        meter.updated = Date()
+      }
+    }
+    return meter
+  }
+}
+
 // MARK: - Crossfade
 
 extension MusicPlayerTest {
@@ -177,17 +210,31 @@ extension MusicPlayerTest {
     wait(for: [nothing], timeout: seconds)
   }
 
+  /// Runs the main run loop until the condition holds
+  private func waitUntil(_ timeout: TimeInterval, _ condition: () -> Bool) -> Bool {
+    let end = Date().addingTimeInterval(timeout)
+    while Date() < end {
+      if condition() { return true }
+      RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+    }
+    return condition()
+  }
+
   func testCrossfadeVolumes() {
     let begin = BackendAudioPlayer.crossfadeVolumes(progress: 0)
     XCTAssertEqual(begin.fadeOut, 1, accuracy: 0.001)
     XCTAssertEqual(begin.fadeIn, 0, accuracy: 0.001)
+    // the incoming song starts very quietly
+    XCTAssertEqual(BackendAudioPlayer.crossfadeVolumes(progress: 0.1).fadeIn, 0.01, accuracy: 0.001)
+    XCTAssertEqual(BackendAudioPlayer.crossfadeVolumes(progress: 0.1).fadeOut, 0.81, accuracy: 0.001)
+    // in the middle both are well below full volume
     let middle = BackendAudioPlayer.crossfadeVolumes(progress: 0.5)
-    XCTAssertEqual(middle.fadeOut, middle.fadeIn, accuracy: 0.001)
-    // equal power: the summed energy stays constant
-    XCTAssertEqual(middle.fadeOut * middle.fadeOut + middle.fadeIn * middle.fadeIn, 1, accuracy: 0.001)
+    XCTAssertEqual(middle.fadeOut, 0.25, accuracy: 0.001)
+    XCTAssertEqual(middle.fadeIn, 0.25, accuracy: 0.001)
     let end = BackendAudioPlayer.crossfadeVolumes(progress: 7)
     XCTAssertEqual(end.fadeOut, 0, accuracy: 0.001)
     XCTAssertEqual(end.fadeIn, 1, accuracy: 0.001)
+    XCTAssertEqual(BackendAudioPlayer.crossfadeDuration, 3)
   }
 
   /// In the last seconds the next song starts on a second player while the first one fades out
@@ -201,17 +248,35 @@ extension MusicPlayerTest {
     let second = MOCK_AudioStreamingPlayer()
     mockAudioStreamingPlayer = second // what the backend gets when it asks for a new player
 
-    waitSeconds(1.6) // the check runs once per second
+    // the check runs once per second, then the fade takes the 1.5 s the first song has left
+    XCTAssertTrue(waitUntil(3, { second.isPlaying && second.volume > 0.02 && second.volume < 0.5 }))
     XCTAssertEqual(testPlayer.currentlyPlaying, songToDownload)
     XCTAssertTrue(first.queuedUrls.isEmpty) // not queued behind the first song
     XCTAssertFalse(first.isStopped) // still fading out
-    XCTAssertTrue(second.isPlaying)
+    XCTAssertLessThan(first.volume, 1)
+    XCTAssertGreaterThan(first.volume, second.volume) // early in the fade the old song still leads
 
-    waitSeconds(2.0) // the fade lasts as long as the first song had left
+    waitSeconds(2.0)
     XCTAssertTrue(first.isStopped)
     XCTAssertTrue(second.isPlaying)
     XCTAssertEqual(second.volume, 1, accuracy: 0.01)
     XCTAssertTrue(testPlayer.isPlaying)
+  }
+
+  /// Further from the end than the crossfade window nothing happens yet
+  func testCrossfade_NotBeforeTheLastSeconds() {
+    backendPlayer.isCrossfadeEnabledCB = { true }
+    let first = mockAudioStreamingPlayer!
+    songCached.remoteDuration = 60
+    testPlayer.appendContextQueue(playables: [songCached, songToDownload])
+    testPlayer.play()
+    first.mockElapsedTime = 54 // 6 s left: the old trigger point
+    mockAudioStreamingPlayer = MOCK_AudioStreamingPlayer()
+
+    waitSeconds(2.2)
+    XCTAssertEqual(testPlayer.currentlyPlaying, songCached)
+    XCTAssertEqual(first.volume, 1, accuracy: 0.01)
+    XCTAssertTrue(first.queuedUrls.isEmpty) // and it is not queued gapless either
   }
 
   /// Pausing during the overlap ends it: only the new song is left, paused
@@ -221,26 +286,17 @@ extension MusicPlayerTest {
     songCached.remoteDuration = 60
     testPlayer.appendContextQueue(playables: [songCached, songToDownload])
     testPlayer.play()
-    first.mockElapsedTime = 55 // 5 s left
+    first.mockElapsedTime = 57 // 3 s left
     let second = MOCK_AudioStreamingPlayer()
     mockAudioStreamingPlayer = second
 
-    waitSeconds(1.6)
+    XCTAssertTrue(waitUntil(3, { second.isPlaying }))
     XCTAssertFalse(first.isStopped)
     testPlayer.pause()
     XCTAssertTrue(first.isStopped)
     XCTAssertFalse(second.isPlaying)
+    XCTAssertEqual(second.volume, 1, accuracy: 0.01) // full volume again for when it resumes
     XCTAssertEqual(testPlayer.currentlyPlaying, songToDownload)
-  }
-
-  /// Runs the main run loop until the condition holds
-  private func waitUntil(_ timeout: TimeInterval, _ condition: () -> Bool) -> Bool {
-    let end = Date().addingTimeInterval(timeout)
-    while Date() < end {
-      if condition() { return true }
-      RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-    }
-    return condition()
   }
 
   private static func sineWav(seconds: Int, frequency: Double) -> Data {
@@ -268,11 +324,17 @@ extension MusicPlayerTest {
     return data
   }
 
-  /// The same hand-over with the real audio players and two real files: both engines run at
-  /// once and the second song really advances. Skipped where no audio can be played.
-  func testCrossfade_RealPlayers_SecondSongPlaysOn() throws {
+  /// The same hand-over with the real audio players and two real files (constant tones), with
+  /// the level each player really puts out measured during the fade.
+  /// Skipped where no audio can be played.
+  func testCrossfade_RealPlayers_MeasuredLevels() throws {
+    var players = [AudioStreamingPlayer]()
     let backend = BackendAudioPlayer(
-      createAudioStreamingPlayerCB: { AudioStreamingPlayer() },
+      createAudioStreamingPlayerCB: {
+        let player = AudioStreamingPlayer()
+        players.append(player)
+        return player
+      },
       audioSessionHandler: AudioSessionHandler(),
       eventLogger: eventLogger,
       getBackendApiCB: { accountInfo in self.backendApi },
@@ -313,23 +375,65 @@ extension MusicPlayerTest {
     }
     player.appendContextQueue(playables: [songCached, songToDownload])
     player.play()
-    guard waitUntil(8, { player.isPlaying && player.elapsedTime > 0.3 }) else {
+    guard waitUntil(8, { player.isPlaying && player.elapsedTime > 0.3 }), players.count == 1 else {
       player.stop()
       throw XCTSkip("no audio can be played here (elapsed \(player.elapsedTime))")
     }
-    print("CROSSFADE-REAL first song runs, elapsed \(player.elapsedTime) of \(player.duration)")
+    let outgoing = LevelMeter.install(on: players[0].mainMixerNode)
+    XCTAssertTrue(waitUntil(3, { outgoing.rms > 0.01 }))
+    waitSeconds(0.5)
+    let full = outgoing.rms // the level of a song at full volume
+    print("CROSSFADE-LEVELS full volume \(full)")
+    // does the measurement follow the player's volume at all?
+    players[0].volume = 0.5
+    waitSeconds(0.5)
+    let half = outgoing.rms
+    players[0].volume = 1
+    print("CROSSFADE-LEVELS at volume 0.5: \(half)")
+    XCTAssertEqual(half / full, 0.5, accuracy: 0.1)
 
-    player.seek(toSecond: 19.5) // 4.5 s left: inside the crossfade window
-    XCTAssertTrue(waitUntil(6, { player.currentlyPlaying == self.songToDownload }))
-    XCTAssertTrue(waitUntil(6, { player.isPlaying && player.elapsedTime > 0.5 }))
-    XCTAssertLessThan(player.elapsedTime, 10) // the second song's own position, not the first one's
-    let duringFade = player.elapsedTime
-    print("CROSSFADE-REAL second song runs during the fade, elapsed \(duringFade)")
+    player.seek(toSecond: 19.5) // the fade must not start before the last 3.5 s
+    waitSeconds(0.6)
+    XCTAssertEqual(players.count, 1)
+    XCTAssertEqual(player.currentlyPlaying, songCached)
 
-    XCTAssertTrue(waitUntil(8, { player.elapsedTime > duringFade + 5 })) // past the fade, still advancing
-    XCTAssertTrue(player.isPlaying)
+    XCTAssertTrue(waitUntil(4, { players.count == 2 }))
+    let requestedAt = Date()
+    let incoming = LevelMeter.install(on: players[1].mainMixerNode)
+    var samples = [(time: Double, out: Float, into: Float)]()
+    while Date().timeIntervalSince(requestedAt) < 5 {
+      RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+      samples.append((Date().timeIntervalSince(requestedAt), outgoing.rms / full, incoming.rms / full))
+    }
+    for sample in samples {
+      print(String(
+        format: "CROSSFADE-LEVELS t=%.1f outgoing=%.2f incoming=%.2f",
+        sample.time, sample.out, sample.into
+      ))
+    }
     XCTAssertEqual(player.currentlyPlaying, songToDownload)
-    print("CROSSFADE-REAL second song runs after the fade, elapsed \(player.elapsedTime)")
+    XCTAssertTrue(player.isPlaying)
+
+    // the incoming song is first heard very quietly
+    let firstHeard = samples.first { $0.into > 0.005 }
+    XCTAssertNotNil(firstHeard)
+    XCTAssertLessThan(firstHeard?.into ?? 1, 0.2)
+    // the two songs never play loudly side by side
+    XCTAssertLessThan(samples.map { min($0.out, $0.into) }.max() ?? 1, 0.4)
+    // the outgoing song only gets quieter, the incoming one only louder (10 % measuring tolerance)
+    for (earlier, later) in zip(samples, samples.dropFirst()) {
+      XCTAssertLessThanOrEqual(later.out, earlier.out + 0.1)
+      XCTAssertGreaterThanOrEqual(later.into, earlier.into - 0.1)
+    }
+    // afterwards: only the new song, at full volume
+    XCTAssertEqual(samples.last?.out ?? 1, 0, accuracy: 0.02)
+    XCTAssertEqual(samples.last?.into ?? 0, 1, accuracy: 0.1)
+    // and the overlap lasts between 1.5 and 3.5 seconds
+    let overlap = samples.filter { $0.out > 0.02 && $0.into > 0.005 }
+    let overlapLength = (overlap.last?.time ?? 0) - (overlap.first?.time ?? 0)
+    print("CROSSFADE-LEVELS overlap \(overlapLength) s")
+    XCTAssertGreaterThan(overlapLength, 1.5)
+    XCTAssertLessThan(overlapLength, 3.5)
     player.stop()
   }
 

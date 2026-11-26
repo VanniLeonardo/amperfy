@@ -139,7 +139,7 @@ struct PlayerSettingsView: View {
           content: {
             SettingsCheckBoxRow(title: "Crossfade", isOn: $settings.isCrossfadeEnabled)
           },
-          footer: "The last 6 seconds of a song fade out while the next song fades in. Pausing, seeking or skipping cuts the overlap."
+          footer: "Over the last 3 seconds of a song its volume falls while the next song starts quietly and rises. Pausing, seeking or skipping cuts the overlap."
         )
 
         SettingsSection(

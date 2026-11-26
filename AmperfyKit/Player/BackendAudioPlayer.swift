@@ -120,7 +120,11 @@ class BackendAudioPlayer: NSObject {
   private var fadingPlayer: AudioStreamingPlayer?
   private var crossfadeTimer: Timer?
   private var isStartingCrossfade = false
-  static let crossfadeDuration: Double = 6.0
+  /// When the outgoing song reaches its end
+  private var crossfadeOutgoingEnd = Date()
+  static let crossfadeDuration: Double = 3.0
+  /// A song that is not downloaded needs a moment before its first sound: it is requested earlier
+  static let crossfadeStreamLeadTime: Double = 1.5
   /// Crossfade (Settings > Player): asked in the last seconds of every song
   var isCrossfadeEnabledCB: (() -> Bool)?
   private var equalizer: AVAudioUnitEQ?
@@ -295,7 +299,9 @@ class BackendAudioPlayer: NSObject {
         else { return }
         if canCrossfade(to: nextPreloadedPlayable) {
           // not queued behind this song: it starts on a player of its own
-          if remainingTime <= Self.crossfadeDuration {
+          // checked once per second: half a second of margin keeps the fade close to its full length
+          let leadTime = nextPreloadedPlayable.isCached ? 0.5 : Self.crossfadeStreamLeadTime
+          if remainingTime <= Self.crossfadeDuration + leadTime {
             startCrossfade(remainingTime: remainingTime)
           }
           return
@@ -330,37 +336,48 @@ class BackendAudioPlayer: NSObject {
     return isCrossfadeEnabledCB?() ?? false
   }
 
-  /// Volumes of the outgoing and the incoming song at a point of the crossfade (equal power)
+  /// Volumes of the outgoing and the incoming song at a point of the crossfade. Squared ramps:
+  /// loudness is heard roughly logarithmically, so the incoming song starts very quietly and
+  /// both change evenly to the ear instead of playing at nearly full volume side by side.
   static func crossfadeVolumes(progress: Double) -> (fadeOut: Float, fadeIn: Float) {
-    let angle = min(max(progress, 0), 1) * Double.pi / 2
-    return (Float(cos(angle)), Float(sin(angle)))
+    let position = min(max(progress, 0), 1)
+    return (Float((1 - position) * (1 - position)), Float(position * position))
   }
 
-  /// The current song keeps playing on its player and fades out, the next one starts on a
-  /// new player and fades in. For everything above this class the current song ends here.
+  /// The next song is requested on a new, silent player while the current one plays on. The
+  /// fade itself begins when the next song gives its first sound, see beginCrossfadeRamp.
+  /// For everything above this class the current song ends here.
   private func startCrossfade(remainingTime: Double) {
     guard let outgoing = player else { return }
-    os_log(.default, "Crossfade over %.1f s", remainingTime)
+    os_log(.default, "Crossfade: next song requested %.1f s before the end", remainingTime)
     outgoing.delegate = nil // its end is not the end of the current song anymore
     fadingPlayer = outgoing
+    crossfadeOutgoingEnd = Date().addingTimeInterval(remainingTime)
     player = nil
     initAudioStreamingPlayerAndNodes()
     player?.volume = 0
+    currentPlayUrl = ""
+    isStartingCrossfade = true
+    itemFinishedPlaying() // the layers above request the next song, see handleRequest
+    isStartingCrossfade = false
+  }
+
+  /// The incoming song has started: lower the outgoing one and raise the incoming one over the
+  /// time the outgoing song has left, 3 seconds at most
+  private func beginCrossfadeRamp() {
+    let length = max(0.5, min(Self.crossfadeDuration, crossfadeOutgoingEnd.timeIntervalSinceNow))
+    os_log(.default, "Crossfade over %.1f s", length)
     let start = Date()
-    crossfadeTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+    crossfadeTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
       Task { @MainActor in
         guard let self, self.fadingPlayer != nil else { return }
-        let progress = Date().timeIntervalSince(start) / remainingTime
+        let progress = Date().timeIntervalSince(start) / length
         guard progress < 1 else { return self.endCrossfade() }
         let volumes = Self.crossfadeVolumes(progress: progress)
         self.fadingPlayer?.volume = self.volumePlayer * volumes.fadeOut
         self.player?.volume = self.volumePlayer * volumes.fadeIn
       }
     }
-    currentPlayUrl = ""
-    isStartingCrossfade = true
-    itemFinishedPlaying() // the layers above request the next song, see handleRequest
-    isStartingCrossfade = false
   }
 
   /// Also cuts a crossfade short: pausing, seeking, stopping or another song ends the overlap
@@ -1026,6 +1043,9 @@ extension BackendAudioPlayer: AudioStreaming.AudioPlayerDelegate {
       if shouldPlay {
         continuePlay()
         audioAnalyzer.play()
+        if fadingPlayer != nil, crossfadeTimer == nil {
+          beginCrossfadeRamp()
+        }
       } else {
         pause()
         audioAnalyzer.stop()
