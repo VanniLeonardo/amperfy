@@ -348,113 +348,118 @@ class BasicTableViewController: KeyCommandTableViewController {
     ) { action, view, completionHandler in
       Haptics.success
         .vibrate(isHapticsEnabled: self.appDelegate.storage.settings.user.isHapticsEnabled)
-      actionCallback(indexPath) { actionContext in
-        guard let actionContext = actionContext else { return }
-        switch actionType {
-        case .insertUserQueue:
-          self.appDelegate.player
-            .insertUserQueue(
-              playables: actionContext.playables
-                .filterCached(dependigOn: self.appDelegate.storage.settings.user.isOfflineMode)
-            )
-        case .appendUserQueue:
-          self.appDelegate.player
-            .appendUserQueue(
-              playables: actionContext.playables
-                .filterCached(dependigOn: self.appDelegate.storage.settings.user.isOfflineMode)
-            )
-        case .insertContextQueue:
-          self.appDelegate.player
-            .insertContextQueue(
-              playables: actionContext.playables
-                .filterCached(dependigOn: self.appDelegate.storage.settings.user.isOfflineMode)
-            )
-        case .appendContextQueue:
-          let playables = actionContext.playables
-            .filterCached(dependigOn: self.appDelegate.storage.settings.user.isOfflineMode)
-          // Soft Queue: appended songs play before the rest of the context queue
-          if self.appDelegate.storage.settings.user.isSoftQueueEnabled {
-            self.appDelegate.player.appendUserQueue(playables: playables)
-          } else {
-            self.appDelegate.player.appendContextQueue(playables: playables)
-          }
-        case .download:
-          if let account = actionContext.containable.account {
-            self.appDelegate.getMeta(account.info).playableDownloadManager
-              .download(objects: actionContext.playables)
-          }
-        case .removeFromCache:
-          let alert = UIAlertController(
-            title: nil,
-            message: "Are you sure to delete the cached file\(actionContext.playables.count > 1 ? "s" : "")?",
-            preferredStyle: .alert
-          )
-          alert.addAction(UIAlertAction(title: "Delete", style: .destructive, handler: { _ in
+      // Close the row before the work: fetching the list's songs and updating the queue can
+      // block the main thread for a moment, which made the swipe feel stuck.
+      completionHandler(true)
+      Task { @MainActor in
+        try? await Task.sleep(for: .milliseconds(30))
+        actionCallback(indexPath) { actionContext in
+          guard let actionContext = actionContext else { return }
+          switch actionType {
+          case .insertUserQueue:
+            self.appDelegate.player
+              .insertUserQueue(
+                playables: actionContext.playables
+                  .filterCached(dependigOn: self.appDelegate.storage.settings.user.isOfflineMode)
+              )
+          case .appendUserQueue:
+            self.appDelegate.player
+              .appendUserQueue(
+                playables: actionContext.playables
+                  .filterCached(dependigOn: self.appDelegate.storage.settings.user.isOfflineMode)
+              )
+          case .insertContextQueue:
+            self.appDelegate.player
+              .insertContextQueue(
+                playables: actionContext.playables
+                  .filterCached(dependigOn: self.appDelegate.storage.settings.user.isOfflineMode)
+              )
+          case .appendContextQueue:
+            let playables = actionContext.playables
+              .filterCached(dependigOn: self.appDelegate.storage.settings.user.isOfflineMode)
+            // Soft Queue: appended songs play before the rest of the context queue
+            if self.appDelegate.storage.settings.user.isSoftQueueEnabled {
+              self.appDelegate.player.appendUserQueue(playables: playables)
+            } else {
+              self.appDelegate.player.appendContextQueue(playables: playables)
+            }
+          case .download:
             if let account = actionContext.containable.account {
               self.appDelegate.getMeta(account.info).playableDownloadManager
-                .removeFinishedDownload(for: actionContext.playables)
+                .download(objects: actionContext.playables)
             }
-            self.appDelegate.storage.main.library.deleteCache(of: actionContext.playables)
-            self.appDelegate.storage.main.saveContext()
-            if let cell = self.tableView.cellForRow(at: indexPath) as? PlayableTableCell {
-              cell.refresh()
-            }
-          }))
-          alert.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: { _ in
-            // do nothing
-          }))
-          self.present(alert, animated: true, completion: nil)
-        case .addToPlaylist:
-          let filterSongs = actionContext.playables.filterSongs()
-          if let account = filterSongs.first?.account {
-            let selectPlaylistVC = AppStoryboard.Main
-              .segueToPlaylistSelector(
-                account: account,
-                itemsToAdd: filterSongs
-              )
-            let selectPlaylistNav = UINavigationController(rootViewController: selectPlaylistVC)
-            self.present(selectPlaylistNav, animated: true)
-          }
-        case .play:
-          self.appDelegate.player.play(context: actionContext.playContext)
-        case .playShuffled:
-          var playContext = actionContext.playContext
-          if actionContext.playables.count <= 1 {
-            playContext.isKeepIndexDuringShuffle = true
-          }
-          self.appDelegate.player.playShuffled(context: playContext)
-        case .insertPodcastQueue:
-          self.appDelegate.player
-            .insertPodcastQueue(
-              playables: actionContext.playables
-                .filterCached(dependigOn: self.appDelegate.storage.settings.user.isOfflineMode)
+          case .removeFromCache:
+            let alert = UIAlertController(
+              title: nil,
+              message: "Are you sure to delete the cached file\(actionContext.playables.count > 1 ? "s" : "")?",
+              preferredStyle: .alert
             )
-        case .appendPodcastQueue:
-          self.appDelegate.player
-            .appendPodcastQueue(
-              playables: actionContext.playables
-                .filterCached(dependigOn: self.appDelegate.storage.settings.user.isOfflineMode)
-            )
-        case .favorite:
-          Task { @MainActor in
-            do {
+            alert.addAction(UIAlertAction(title: "Delete", style: .destructive, handler: { _ in
               if let account = actionContext.containable.account {
-                try await actionContext.containable
-                  .remoteToggleFavorite(
-                    syncer: self.appDelegate
-                      .getMeta(account.info).librarySyncer
-                  )
+                self.appDelegate.getMeta(account.info).playableDownloadManager
+                  .removeFinishedDownload(for: actionContext.playables)
               }
-            } catch {
-              self.appDelegate.eventLogger.report(topic: "Toggle Favorite", error: error)
+              self.appDelegate.storage.main.library.deleteCache(of: actionContext.playables)
+              self.appDelegate.storage.main.saveContext()
+              if let cell = self.tableView.cellForRow(at: indexPath) as? PlayableTableCell {
+                cell.refresh()
+              }
+            }))
+            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: { _ in
+              // do nothing
+            }))
+            self.present(alert, animated: true, completion: nil)
+          case .addToPlaylist:
+            let filterSongs = actionContext.playables.filterSongs()
+            if let account = filterSongs.first?.account {
+              let selectPlaylistVC = AppStoryboard.Main
+                .segueToPlaylistSelector(
+                  account: account,
+                  itemsToAdd: filterSongs
+                )
+              let selectPlaylistNav = UINavigationController(rootViewController: selectPlaylistVC)
+              self.present(selectPlaylistNav, animated: true)
             }
-            if let cell = self.tableView.cellForRow(at: indexPath) as? PlayableTableCell {
-              cell.refresh()
+          case .play:
+            self.appDelegate.player.play(context: actionContext.playContext)
+          case .playShuffled:
+            var playContext = actionContext.playContext
+            if actionContext.playables.count <= 1 {
+              playContext.isKeepIndexDuringShuffle = true
+            }
+            self.appDelegate.player.playShuffled(context: playContext)
+          case .insertPodcastQueue:
+            self.appDelegate.player
+              .insertPodcastQueue(
+                playables: actionContext.playables
+                  .filterCached(dependigOn: self.appDelegate.storage.settings.user.isOfflineMode)
+              )
+          case .appendPodcastQueue:
+            self.appDelegate.player
+              .appendPodcastQueue(
+                playables: actionContext.playables
+                  .filterCached(dependigOn: self.appDelegate.storage.settings.user.isOfflineMode)
+              )
+          case .favorite:
+            Task { @MainActor in
+              do {
+                if let account = actionContext.containable.account {
+                  try await actionContext.containable
+                    .remoteToggleFavorite(
+                      syncer: self.appDelegate
+                        .getMeta(account.info).librarySyncer
+                    )
+                }
+              } catch {
+                self.appDelegate.eventLogger.report(topic: "Toggle Favorite", error: error)
+              }
+              if let cell = self.tableView.cellForRow(at: indexPath) as? PlayableTableCell {
+                cell.refresh()
+              }
             }
           }
         }
       }
-      completionHandler(true)
     }
     action.backgroundColor = buttonColor
     if actionType == .favorite {
