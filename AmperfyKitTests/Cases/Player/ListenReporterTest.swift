@@ -233,6 +233,106 @@ extension MusicPlayerTest {
     XCTAssertEqual(testPlayer.currentlyPlaying, songToDownload)
   }
 
+  /// Runs the main run loop until the condition holds
+  private func waitUntil(_ timeout: TimeInterval, _ condition: () -> Bool) -> Bool {
+    let end = Date().addingTimeInterval(timeout)
+    while Date() < end {
+      if condition() { return true }
+      RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+    }
+    return condition()
+  }
+
+  private static func sineWav(seconds: Int, frequency: Double) -> Data {
+    let rate = 22050
+    let sampleCount = rate * seconds
+    var data = Data()
+    func append<T: FixedWidthInteger>(_ value: T) {
+      withUnsafeBytes(of: value.littleEndian) { data.append(contentsOf: $0) }
+    }
+    data.append(contentsOf: Array("RIFF".utf8))
+    append(UInt32(36 + sampleCount * 2))
+    data.append(contentsOf: Array("WAVEfmt ".utf8))
+    append(UInt32(16)) // PCM header size
+    append(UInt16(1)) // PCM
+    append(UInt16(1)) // mono
+    append(UInt32(rate))
+    append(UInt32(rate * 2))
+    append(UInt16(2))
+    append(UInt16(16))
+    data.append(contentsOf: Array("data".utf8))
+    append(UInt32(sampleCount * 2))
+    for index in 0 ..< sampleCount {
+      append(Int16(8000 * sin(2 * Double.pi * frequency * Double(index) / Double(rate))))
+    }
+    return data
+  }
+
+  /// The same hand-over with the real audio players and two real files: both engines run at
+  /// once and the second song really advances. Skipped where no audio can be played.
+  func testCrossfade_RealPlayers_SecondSongPlaysOn() throws {
+    let backend = BackendAudioPlayer(
+      createAudioStreamingPlayerCB: { AudioStreamingPlayer() },
+      audioSessionHandler: AudioSessionHandler(),
+      eventLogger: eventLogger,
+      getBackendApiCB: { accountInfo in self.backendApi },
+      networkMonitor: networkMonitor,
+      getPlayableDownloaderCB: { accountInfo in self.songDownloader },
+      cacheProxy: library,
+      userStatistics: userStatistics
+    )
+    backend.isCrossfadeEnabledCB = { true }
+    let queueHandler = PlayQueueHandler(playerData: playerData)
+    let musicPlayer = AudioPlayer(
+      coreData: playerData,
+      queueHandler: queueHandler,
+      backendAudioPlayer: backend,
+      settings: storage.settings,
+      userStatistics: userStatistics
+    )
+    let player: PlayerFacade = PlayerFacadeImpl(
+      playerStatus: playerData,
+      queueHandler: queueHandler,
+      musicPlayer: musicPlayer,
+      library: library,
+      backendAudioPlayer: backend,
+      userStatistics: userStatistics
+    )
+    let songs: [(Song, String, Double)] = [
+      (songCached, "crossfadeA.wav", 440), (songToDownload, "crossfadeB.wav", 660),
+    ]
+    for (song, name, frequency) in songs {
+      let relFilePath = URL(string: name)!
+      let absFilePath = CacheFileManager.shared.getAbsoluteAmperfyPath(relFilePath: relFilePath)!
+      try CacheFileManager.shared.writeDataExcludedFromBackup(
+        data: Self.sineWav(seconds: 24, frequency: frequency),
+        to: absFilePath, accountInfo: account.info
+      )
+      song.relFilePath = relFilePath
+      song.remoteDuration = 24
+    }
+    player.appendContextQueue(playables: [songCached, songToDownload])
+    player.play()
+    guard waitUntil(8, { player.isPlaying && player.elapsedTime > 0.3 }) else {
+      player.stop()
+      throw XCTSkip("no audio can be played here (elapsed \(player.elapsedTime))")
+    }
+    print("CROSSFADE-REAL first song runs, elapsed \(player.elapsedTime) of \(player.duration)")
+
+    player.seek(toSecond: 19.5) // 4.5 s left: inside the crossfade window
+    XCTAssertTrue(waitUntil(6, { player.currentlyPlaying == self.songToDownload }))
+    XCTAssertTrue(waitUntil(6, { player.isPlaying && player.elapsedTime > 0.5 }))
+    XCTAssertLessThan(player.elapsedTime, 10) // the second song's own position, not the first one's
+    let duringFade = player.elapsedTime
+    print("CROSSFADE-REAL second song runs during the fade, elapsed \(duringFade)")
+
+    XCTAssertTrue(waitUntil(8, { player.elapsedTime > duringFade + 5 })) // past the fade, still advancing
+    XCTAssertTrue(player.isPlaying)
+    XCTAssertEqual(player.currentlyPlaying, songToDownload)
+    print("CROSSFADE-REAL second song runs after the fade, elapsed \(player.elapsedTime)")
+    player.stop()
+  }
+
   /// Switched off, the next song is queued behind the current one on the same player
   func testCrossfadeOff_NextSongIsQueuedGapless() {
     backendPlayer.isCrossfadeEnabledCB = { false }
