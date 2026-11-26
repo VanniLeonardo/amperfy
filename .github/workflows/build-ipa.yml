@@ -1,12 +1,12 @@
 # Fork only: builds an unsigned IPA of a branch for sideloading (SideStore signs it on the phone).
-# Run: gh workflow run build-ipa.yml -f ref=soft-queue
+# Run: gh workflow run build-ipa.yml -f ref=leomusique
 name: Build unsigned IPA
 on:
   workflow_dispatch:
     inputs:
       ref:
         description: Branch to build
-        default: soft-queue
+        default: leomusique
 jobs:
   build:
     runs-on: macos-26
@@ -29,14 +29,14 @@ jobs:
         run: |
           app=build/Build/Products/Release-iphoneos/Amperfy.app
           # Own name on the home screen, so it can sit next to the App Store version
-          /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Amperfy Soft" "$app/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string LeoMusique" "$app/Info.plist"
           mkdir Payload && cp -R "$app" Payload/
-          zip -qry Amperfy-soft-queue.ipa Payload
-          ls -lh Amperfy-soft-queue.ipa
+          zip -qry LeoMusique.ipa Payload
+          ls -lh LeoMusique.ipa
       - uses: actions/upload-artifact@v4
         with:
-          name: Amperfy-soft-queue
-          path: Amperfy-soft-queue.ipa
+          name: LeoMusique
+          path: LeoMusique.ipa
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
